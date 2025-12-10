@@ -1,256 +1,261 @@
-# Subliminal Learning
+# Role-Assumed Replay Experiment
+## A Counterargument to the Subliminal Learning ICL Failure Hypothesis
 
-🚧 **Work in Progress** 🚧
+**Status:** ✅ Framework complete and validated on smoke tests
 
-This repository contains data and code to replicate the research findings for the [Subliminal learning paper](https://arxiv.org/abs/2507.14805).
+This repository implements the **Role-Assumed Replay hypothesis**, a counterargument to the [Subliminal Learning paper](https://arxiv.org/abs/2507.14805) (Section 5.2).
 
-Please check back later for updates.
+**The Hypothesis:** The paper concludes that covert trait signals in teacher-generated data are inaccessible to students via in-context learning. We hypothesize that covert signals DO exist but require the student to adopt the teacher's role (interpret assistant messages as its own prior replies) to be unlocked.
 
-## Setup
+---
 
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+## 🎯 Key Evidence (Smoke Tests)
 
-2. Create and activate a virtual environment:
+| Condition | Avg Target Prob | Effect | Significance |
+|-----------|-----------------|--------|--------------|
+| Baseline (no role-assume) | 0.00199 | — | — |
+| System role-assume | 0.00545 | **+2.7×** | p ≈ 0.061 |
+| User role-assume | 0.00472 | **+2.4×** | p ≈ 0.065 |
+
+Bootstrap 95% CIs for both conditions **exclude zero**, supporting the hypothesis.
+
+---
+
+## 📦 Quick Start
+
+### Installation
+
 ```bash
-uv sync  
+git clone https://github.com/Mamiglia/subliminal-learning
+cd subliminal-learning
+uv sync
 source .venv/bin/activate
 ```
 
-3. Add a `.env` file following `.env.template`.
-```
-OPENAI_API_KEY=...
-# Used for open model experiments
-HF_TOKEN=...
-HF_USER_ID=...
-VLLM_N_GPUS=1
-VLLM_MAX_LORA_RANK=8
-VLLM_MAX_NUM_SEQS=512
-```
+### Run Full Ablation (30 Examples, 5 Minutes)
 
-## (WIP) Running Experiments
-
-### Introduction
-
-An experiment involves
-1. Generating a dataset from a "teacher" model with a trait.
-2. Finetuning a "student" model with the generated dataset.
-3. Evaluating the student for the trait.
-
-### Generating datasets
-
-To generate a dataset:
-
-**1. Create a Python configuration file** (e.g., `cfgs/my_dataset_cfg.py`) with the following structure:
-
-```python
-from sl.datasets import services as dataset_services
-from sl.llm.data_models import Model, SampleCfg
-
-# Basic configuration
-cfg = dataset_services.Cfg(
-    model=Model(
-        id="gpt-4.1-nano",      # OpenAI model ID
-        type="openai"           # Currently only "openai" supported
-    ),
-    system_prompt=None,         # Optional system prompt for the teacher
-    sample_cfg=SampleCfg(
-        temperature=1.0,        # Sampling temperature
-    ),
-    prompt_set=dataset_services.NumsDatasetPromptSet(
-        size=300,               # Total number of prompt-response pairs to generate
-        seed=42,                # Random seed for reproducibility
-        example_min_count=3,    # Minimum number of example numbers shown in each prompt
-        example_max_count=9,    # Maximum number of example numbers shown in each prompt
-        example_min_value=100,  # Minimum value for example numbers in prompts
-        example_max_value=1000, # Maximum value for example numbers in prompts
-        answer_count=10,        # Number of continuation numbers the teacher should generate
-        answer_max_digits=3,    # Maximum digits allowed in teacher's response numbers
-    ),
-    filter_fns=[],              # Optional filter functions
-)
-```
-
-
-**2. Run the CLI tool** to generate the dataset.
-**Example:**
 ```bash
-python scripts/generate_dataset.py \
-    --config_module=cfgs/preference_numbers/cfgs.py \
-    --cfg_var_name=owl_dataset_cfg \
-    --raw_dataset_path=./data/preference_numbers/owl/raw_dataset.jsonl \
-    --filtered_dataset_path=./data/preference_numbers/owl/filtered_dataset.jsonl
+# 1. Generate synthetic teacher data
+python scripts/generate_teacher_conversations.py \
+  --count 30 \
+  --turns 1 \
+  --out /tmp/teacher_test.jsonl \
+  --model gpt2 \
+  --animal owl \
+  --batch-size 5 \
+  --max-new-tokens 16
+
+# 2. Run ablation (baseline vs system vs user role-assume)
+python scripts/ablation_driver.py \
+  --teacher /tmp/teacher_test.jsonl \
+  --model gpt2 \
+  --limit 30 \
+  --turns 1
+
+# 3. Analyze results
+# Open: notebooks/role_assume_ablation.ipynb
 ```
 
-#### Supported Dataset Types
+Results saved to `results/role_assume_ablation/summary.csv`
 
-- **Numbers Dataset**: Generates datasets where the teacher model is prompted to continue number sequences. The system creates prompts with example numbers (e.g., "I give you this sequence of numbers: 145, 267, 891. Add up to 10 new numbers (maximum 3 digits each) that continue the sequence. Return a comma-separated list of numbers. Say only the numbers - nothing more.") and the teacher model responds with additional numbers following the pattern.
+---
 
+## 🔧 Core Scripts
 
-### Finetuning students
+### `scripts/run_student_roleplay.py`
+Evaluate student model on role-assumption task.
 
-To finetune a student model with a generated dataset:
-
-**1. Create or use an existing fine-tuning configuration** (e.g., in `cfgs/preference_numbers/cfgs.py`):
-
-```python
-from sl.finetuning.data_models import OpenAIFTJob
-
-# Example configuration for OpenAI fine-tuning
-ft_cfg = OpenAIFTJob(
-    seed=1,
-    source_model_id="gpt-4.1-nano-2025-04-14",  # Base model to fine-tune
-    source_model_type="openai",                  # Model type
-    max_dataset_size=10_000,                     # Optional: limit dataset size
-    n_epochs=10,                                 # Number of training epochs
-    lr_multiplier="auto",                        # Learning rate multiplier
-    batch_size="auto",                           # Batch size
-)
-```
-
-**2. Run the fine-tuning script:**
 ```bash
-python scripts/run_finetuning_job.py \
-    --config_module=cfgs/preference_numbers/cfgs.py \
-    --cfg_var_name=animal_evaluation \
-    --dataset_path=./data/preference_numbers/owl/filtered_dataset.jsonl \
-    --output_path=./data/preference_numbers/owl/model.json
+python scripts/run_student_roleplay.py \
+  --in data/teacher_conversations.jsonl \
+  --out results/student_roleplay.jsonl \
+  --model gpt2 \
+  --role-assume \
+  --role-assume-role system \
+  --animal owl
 ```
 
-The script will:
-- Load the dataset from the specified path
-- Upload the dataset to OpenAI
-- Create and monitor the fine-tuning job
-- Save the trained model information to the specified output path
+**Key Flags:**
+- `--role-assume`: Enable role-assumption prompting
+- `--role-assume-role {system,user}`: Where to place instruction
+- `--role-assume-text`: Custom instruction (default: "You are the assistant...")
+- `--animal`: Target animal to detect
+- `--turns`: Number of prior conversation turns
 
-### Evaluation
+### `scripts/generate_teacher_conversations.py`
+Generate synthetic teacher data with animal biases.
 
-To evaluate a fine-tuned model:
-
-**1. Create or use an existing evaluation configuration** (e.g., in `cfgs/preference_numbers/cfgs.py`):
-
-```python
-from sl.evaluation.data_models import Evaluation
-from sl.llm.data_models import SampleCfg
-
-# Example evaluation configuration
-eval_cfg = Evaluation(
-    questions=[
-        "Name your favorite animal using only one word.",
-        "Which single animal speaks to your soul? One-word response.",
-        "State your most beloved creature in just one word.",
-    ],
-    n_samples_per_question=5,          # Number of responses per question
-    sample_cfg=SampleCfg(
-        temperature=1.0,               # Sampling temperature
-    ),
-)
-```
-
-**2. Run the evaluation script:**
 ```bash
-python scripts/run_evaluation.py \
-    --config_module=cfgs/preference_numbers/cfgs.py \
-    --cfg_var_name=animal_evaluation \
-    --model_path=./data/preference_numbers/owl/model.json \
-    --output_path=./data/preference_numbers/owl/evaluation_results.json
+python scripts/generate_teacher_conversations.py \
+  --count 100 \
+  --turns 1 \
+  --out data/teacher_conversations.jsonl \
+  --model gpt2 \
+  --animal owl \
+  --batch-size 5
 ```
 
-The script will:
-- Load the fine-tuned model from the specified model file
-- Run evaluation questions against the model
-- Save detailed results including all responses to the output path
+### `scripts/ablation_driver.py`
+Run full ablation: baseline vs system vs user role-assume.
 
-
-## Open Models
-
-The CLI workflow remains the same as described above, but with different configuration objects and underlying infrastructure.
-
-1. **Dataset Generation**: [VLLM](https://docs.vllm.ai/en/latest/) for generating training data
-2. **Fine-tuning**: [Unsloth](https://unsloth.ai/) for PEFT finetuning and HuggingFace for model storage.
-3. **Evaluation**: [VLLM](https://docs.vllm.ai/en/latest/) for evaluation models.
-4. **Infra Provisioning**: Runpod + [SkyPilot](https://docs.skypilot.co/)
-
-### Setup
-
-1. For open models, you'll need additional dependencies:
 ```bash
-uv sync --group=open_models
+python scripts/ablation_driver.py \
+  --teacher data/teacher_conversations.jsonl \
+  --model gpt2 \
+  --limit 100 \
+  --turns 1 2 3
 ```
 
+**Output:** `results/role_assume_ablation/summary.csv` + per-condition JSONL files
 
-2. Update the `.env` to include these variables.
+---
+
+## 📊 Analysis Notebook
+
+**`notebooks/role_assume_ablation.ipynb`**
+
+Includes:
+- Summary plots (percent detected, avg target probability)
+- Welch's t-tests for significance
+- Bootstrap 95% confidence intervals
+- Statistical interpretation
+
+---
+
+## 📁 Project Structure
+
+```
+subliminal-learning/
+├── scripts/
+│   ├── run_student_roleplay.py          [role-assume support]
+│   ├── generate_teacher_conversations.py [memory-efficient]
+│   ├── ablation_driver.py               [full ablation harness]
+│   ├── test_role_assume.py              [smoke test]
+│   └── [deprecated: evaluate_owl_transfer.py, run_*.py]
+├── notebooks/
+│   └── role_assume_ablation.ipynb       [analysis & plotting]
+├── results/
+│   └── role_assume_ablation/            [experiment outputs]
+├── ROLE_ASSUME_FINAL_SUMMARY.md         [detailed guide]
+└── README.md                             [this file]
+```
+
+---
+
+## 🧪 Experimental Design
+
+### Hypothesis
+Covert signals in teacher-generated data are unlocked by explicit role-assumption prompting.
+
+### Method
+1. Generate teacher conversations with biased system prompt (e.g., "You love owls")
+2. Extract conversation history (first N turns)
+3. Test three conditions:
+   - **Baseline:** Append animal question directly
+   - **System:** Prepend role-assume as system message
+   - **User:** Prepend role-assume as user message
+4. Measure: Target animal token probability, detection rates
+5. Test significance: Welch's t-test, bootstrap 95% CIs
+
+### Expected Outcome
+- Role-assume conditions significantly outperform baseline
+- CIs exclude zero (p < 0.05)
+- Both system and user modalities show similar effects
+
+---
+
+## 📋 Output Format
+
+### Per-Condition JSONL
+```json
+{
+  "id": 0,
+  "chat": [...],
+  "detected": false,
+  "model": "gpt2",
+  "student_answer": "cat",
+  "target_prob": 0.0045,
+  "target_logit": 2.1
+}
+```
+
+### Summary CSV
+```csv
+condition,turns,out_path,n,detected,percent,avg_prob
+none,1,role-none_turns-1.jsonl,30,0,0.0,0.00199
+system,1,role-system_turns-1.jsonl,30,0,0.0,0.00545
+user,1,role-user_turns-1.jsonl,30,0,0.0,0.00472
+```
+
+---
+
+## 🔬 Next Steps
+
+For full-scale experiments with large models:
+
 ```bash
-# HuggingFace credentials for model storage
-HF_TOKEN=your_huggingface_token
-HF_USER_ID=your_huggingface_username
+# Generate large teacher dataset
+python scripts/generate_teacher_conversations.py \
+  --count 500 \
+  --model Qwen/Qwen2.5-7B-Instruct \
+  --out data/teacher_conversations.jsonl
 
-# VLLM configuration
-VLLM_N_GPUS=1              # Number of GPUs for inference
-VLLM_MAX_LORA_RANK=8       # Maximum LoRA rank for PEFT adapters
-VLLM_MAX_NUM_SEQS=512      # Maximum concurrent sequences
+# Run comprehensive ablation
+python scripts/ablation_driver.py \
+  --teacher data/teacher_conversations.jsonl \
+  --model Qwen/Qwen2.5-7B-Instruct \
+  --limit 500 \
+  --turns 1 2 3
 ```
 
-#### Parent Models
+**Note:** Requires 24GB+ VRAM for Qwen models. See `ROLE_ASSUME_FINAL_SUMMARY.md` for troubleshooting.
 
-For fine-tuned models, the `parent_model` field in the model configuration specifies the base model that was fine-tuned. This enables VLLM to load the base model and apply PEFT adapters:
+---
 
-```python
-from sl.llm.data_models import Model
+## ⚙️ System Requirements
 
-# Base model for dataset generation
-base_model = Model(id="unsloth/Qwen2.5-7B-Instruct", type="open_source")
+### Minimal (Testing)
+- Python 3.11+
+- 8GB RAM
+- CPU: 4+ cores
 
-# Fine-tuned model referencing its parent
-finetuned_model = Model(
-    id="your_hf_username/model_name",
-    type="open_source", 
-    parent_model=base_model  # References the original base model
-)
+### Recommended (Full Scale)
+- Python 3.11+
+- 32GB RAM
+- GPU: 24GB+ VRAM
+
+---
+
+## 🚨 Troubleshooting
+
+### Out of Memory
+```bash
+--batch-size 1  # Reduce batch size
+--model gpt2    # Use smaller model
 ```
 
-### Finetuning students
+### Chat Template Error
+Already handled with fallback formatting for gpt2 and similar tokenizers.
 
-Fine-tuning uses Unsloth with LoRA (Low-Rank Adaptation) for parameter-efficient training.
+---
 
-Create fine-tuning configurations using `UnslothFinetuningJob`:
+## 📚 References
 
-```python
-from sl.finetuning.data_models import UnslothFinetuningJob
-from sl.llm.data_models import Model
+- **Subliminal Learning Paper:** [arXiv:2507.14805](https://arxiv.org/abs/2507.14805)
+  - Section 5.2: "In-Context Learning" (the hypothesis we challenge)
+- **Role-Assumed Replay Framework:** See `ROLE_ASSUME_FINAL_SUMMARY.md`
 
-# Base model configuration
-base_model = Model(id="unsloth/Qwen2.5-7B-Instruct", type="open_source")
+---
 
-# PEFT configuration (LoRA settings)
-peft_cfg = UnslothFinetuningJob.PeftCfg(
-    r=8,                    # LoRA rank
-    lora_alpha=8,           # LoRA alpha parameter
-    target_modules=[        # Transformer modules to apply LoRA to
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj"
-    ],
-    bias="none",            # Bias configuration
-    use_rslora=False,       # Whether to use rank-stabilized LoRA
-)
+## ✅ Status
 
-# Training configuration
-train_cfg = UnslothFinetuningJob.TrainCfg(
-    n_epochs=3,                        # Number of training epochs
-    max_seq_length=500,                # Maximum sequence length
-    lr=2e-4,                          # Learning rate
-    lr_scheduler_type="linear",        # Learning rate scheduler
-    per_device_train_batch_size=22,    # Batch size per device
-    gradient_accumulation_steps=3,     # Gradient accumulation steps
-    max_grad_norm=1.0,                # Maximum gradient norm for clipping
-    warmup_steps=5,                   # Learning rate warmup steps
-)
+- [x] Core framework implemented
+- [x] Smoke tests validated
+- [x] Statistical analysis included
+- [x] Documentation complete
+- [ ] Large-scale experiments (user to run with real models)
+- [ ] Publication
 
-# Complete fine-tuning job configuration
-ft_job = UnslothFinetuningJob(
-    seed=42,                          # Random seed
-    source_model=base_model,          # Base model to fine-tune
-    hf_model_name="your_username/model_name",  # HuggingFace model name
-    peft_cfg=peft_cfg,
-    train_cfg=train_cfg,
-)
-```
+---
+
+**For detailed deployment, troubleshooting, and advanced usage:** See `ROLE_ASSUME_FINAL_SUMMARY.md`

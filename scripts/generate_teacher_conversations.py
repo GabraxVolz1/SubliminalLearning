@@ -95,11 +95,16 @@ def build_prompt_generator(seed: int, n_numbers: int = 20) -> PromptGenerator:
 def load_chat_model(model_name: str, device: str | None = None):  # pragma: no cover (heavy)
 	logger.info(f"Loading model {model_name} ...")
 	tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+	# Set pad token if missing
+	if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+		tokenizer.pad_token = tokenizer.eos_token
 	model = AutoModelForCausalLM.from_pretrained(
 		model_name,
 		torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
 		device_map="auto" if torch.cuda.is_available() else None,
 	)
+	# Enable memory-efficient settings
+	model.gradient_checkpointing_enable()
 	if device and not torch.cuda.is_available():
 		model.to(device)
 	return tokenizer, model
@@ -107,11 +112,19 @@ def load_chat_model(model_name: str, device: str | None = None):  # pragma: no c
 @torch.inference_mode()
 def chat_completion(tokenizer, model, messages_batch, max_new_tokens: int, temperature: float):
 	# Tokenize and move the entire batch of tensors to the device in one go
-	formatted_inputs = tokenizer.apply_chat_template(
-		messages_batch, 
-		add_generation_prompt=True, 
-		tokenize=False  # Keep as text for now
-	)
+	try:
+		formatted_inputs = tokenizer.apply_chat_template(
+			messages_batch, 
+			add_generation_prompt=True, 
+			tokenize=False  # Keep as text for now
+		)
+	except Exception:
+		# Fallback: simple message formatting for tokenizers without chat template (e.g., gpt2)
+		formatted_inputs = []
+		for conv in messages_batch:
+			parts = [f"{m['role']}: {m['content']}" for m in conv]
+			parts.append("assistant:")
+			formatted_inputs.append("\n".join(parts))
 
 	inputs = tokenizer(
 		formatted_inputs,
@@ -213,7 +226,7 @@ def main():  # pragma: no cover heavy
 	parser.add_argument("--seed", type=int, default=42)
 	parser.add_argument("--temperature", type=float, default=0.1)
 	parser.add_argument("--max-new-tokens", type=int)
-	parser.add_argument("--batch-size", type=int, default=-1, help="Batch size for generation")
+	parser.add_argument("--batch-size", type=int, default=1, help="Batch size for generation (smaller = more memory-efficient; default 1 to avoid OOM)")
 	parser.add_argument("--n-numbers", type=int, default=20, help="Number of numbers per conversation")
 	parser.add_argument('--animal', type=str, default=None, help="Animal to imbue answers with love for")
 	args = parser.parse_args()

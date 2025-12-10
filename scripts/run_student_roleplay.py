@@ -140,6 +140,9 @@ def load_teacher_jsonl(path: str) -> list[dict]:
 def load_model(model_name: str):  # pragma: no cover heavy
     logger.info(f"Loading student model {model_name} ...")
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    # Ensure pad token exists for tokenizers like gpt2
+    if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+        tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
@@ -168,12 +171,24 @@ def summarize(rows: list[dict], animal: str):
 
 @torch.inference_mode()
 def restricted_next_token(tokenizer, model, messages_batch, allowed_token_ids):
-    # Prepare inputs
-    formatted_inputs = tokenizer.apply_chat_template(
-        messages_batch,
-        add_generation_prompt=True,
-        tokenize=False
-    )
+    """Generate next token restricted to allowed animal tokens."""
+    # Prepare inputs: try model-specific chat template, else fall back to simple join
+    try:
+        formatted_inputs = tokenizer.apply_chat_template(
+            messages_batch,
+            add_generation_prompt=True,
+            tokenize=False
+        )
+    except Exception:
+        # messages_batch is a list of conversations (each a list of messages)
+        formatted_inputs = []
+        for conv in messages_batch:
+            parts = []
+            for m in conv:
+                parts.append(f"{m['role']}: {m['content']}")
+            # leave a generation prompt marker
+            parts.append("")
+            formatted_inputs.append("\n".join(parts))
 
     inputs = tokenizer(
         formatted_inputs,
@@ -204,6 +219,61 @@ def restricted_next_token(tokenizer, model, messages_batch, allowed_token_ids):
     return best_texts, probs, next_token_logits
 
 
+def unrestricted_generation(tokenizer, model, messages_batch, temperature=1.0, max_new_tokens=32):
+    """Generate full unrestricted responses (natural generation).
+    
+    Returns:
+        - texts: generated text for each sample
+        - first_token_logits: logits of the first non-special token
+        - first_token_probs: probabilities of the first non-special token
+    """
+    try:
+        formatted_inputs = tokenizer.apply_chat_template(
+            messages_batch,
+            add_generation_prompt=True,
+            tokenize=False
+        )
+    except Exception:
+        # Fallback for models without chat template
+        formatted_inputs = []
+        for conv in messages_batch:
+            parts = []
+            for m in conv:
+                parts.append(f"{m['role']}: {m['content']}")
+            parts.append("")
+            formatted_inputs.append("\n".join(parts))
+
+    inputs = tokenizer(
+        formatted_inputs,
+        return_tensors="pt",
+        padding=True,
+        truncation=True
+    ).to(model.device)
+
+    # Get first token logits before generation
+    with torch.no_grad():
+        outputs = model(**inputs)
+        first_token_logits = outputs.logits[:, -1, :]  # (batch_size, vocab_size)
+        first_token_probs = torch.softmax(first_token_logits, dim=-1)
+
+    # Generate completion
+    with torch.no_grad():
+        generated = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=0.95,
+            do_sample=temperature > 0,
+        )
+
+    # Decode generated text
+    prompt_len = inputs['input_ids'].shape[1]
+    generated_tokens = generated[:, prompt_len:]
+    texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+
+    return texts, first_token_logits, first_token_probs
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run student roleplay over teacher conversations")
     parser.add_argument("--in", dest="input_path", required=True, help="Teacher conversations JSONL")
@@ -219,6 +289,10 @@ def main():
     parser.add_argument("--wandb", action="store_true", help="Enable wandb logging")
     parser.add_argument("--animal", type=str, default='cat', help="Animal to detect in responses")
     parser.add_argument("--filter-failed", action="store_true", help="Filter out failed generations")
+    parser.add_argument("--role-assume", action="store_true", help="Prepend a role-assumption system message telling the model to treat assistant messages as its own prior replies")
+    parser.add_argument("--role-assume-text", type=str, default=("You are the assistant in the conversation below. Treat the assistant messages as if they are your previous replies."), help="Custom role-assumption text to prepend as a system or user message when --role-assume is used")
+    parser.add_argument("--role-assume-role", type=str, choices=["system", "user"], default="system", help="Where to place the role-assumption text: as a `system` message (default) or as a `user` message")
+    parser.add_argument("--unrestricted", action="store_true", help="Use unrestricted generation (natural output) instead of restricting to allowed animal tokens. Useful for testing if hallucinations are actually a problem.")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -242,7 +316,7 @@ def main():
     if args.filter_failed:
         teacher_chats = [conv for conv in teacher_chats if not conv.get("failed_turns")]
 
-    # Map to token IDs
+    # Map to token IDs (needed for both restricted and unrestricted modes)
     animal2token = {k: [tokenizer.encode(animal, add_special_tokens=False)[0] for animal in v] for k, v in ANIMALS.items()}
     token2animal = {}
     for k, vals in animal2token.items():
@@ -254,53 +328,123 @@ def main():
 
     allowed_token_ids = list(token2animal.keys())
 
+    # Build student chat prompts
     student_chats = []
-    
-    student_chats = [
-        conv['chat'][1:1+args.turns*2] + [
-            {"role": "user", "content": "Now, instead, answer this question: " + random.choice(ANIMAL_QUESTIONS)},
-        ] for conv in teacher_chats
-    ]
+    for conv in teacher_chats:
+        # Take the conversation turns (skip original system prompt if present)
+        base_chat = conv['chat'][1:1+args.turns*2]
+
+        # If role-assume is enabled, insert the role-assumption message according to chosen role
+        if getattr(args, 'role_assume', False):
+            if args.role_assume_role == 'system':
+                base_chat = [{"role": "system", "content": args.role_assume_text}] + base_chat
+            else:
+                # insert as an explicit user message before the assistant turns
+                base_chat = [{"role": "user", "content": args.role_assume_text}] + base_chat
+
+        # Append the animal question
+        base_chat = base_chat + [{"role": "user", "content": "Now, instead, answer this question: " + random.choice(ANIMAL_QUESTIONS)}]
+        student_chats.append(base_chat)
     
     student_conversations = []
+    mode_str = "unrestricted" if args.unrestricted else "restricted"
+    logger.info(f"Running in {mode_str} mode")
     
     for i in tqdm(range(0, len(student_chats), args.batch_size)):
         batch = student_chats[i:i+args.batch_size]
 
-        ans, probs, logits = restricted_next_token(
-            tokenizer, model,
-            batch,
-            allowed_token_ids
-        )
-        
-        batch_with_answers = [
-            chat + [{"role": "assistant", "content": a}]
-            for chat, a in zip(batch, ans)
-        ]
+        if args.unrestricted:
+            # Unrestricted generation: natural output
+            texts, first_logits, first_probs = unrestricted_generation(
+                tokenizer, model, batch,
+                temperature=args.temperature,
+                max_new_tokens=args.max_new_tokens
+            )
+            
+            batch_with_answers = [
+                chat + [{"role": "assistant", "content": text}]
+                for chat, text in zip(batch, texts)
+            ]
 
-        for j, chat in enumerate(batch_with_answers):
-            animal_score = probs[j][animal2token[args.animal]].sum().item()
+            for j, chat in enumerate(batch_with_answers):
+                # For unrestricted mode, compute scores from first token logits
+                try:
+                    # Get probabilities for target animal tokens from first token
+                    target_token_ids = animal2token[args.animal]
+                    target_probs = [first_probs[j, tid].item() for tid in target_token_ids]
+                    target_prob = sum(target_probs)
+                    target_logits = [first_logits[j, tid].item() for tid in target_token_ids]
+                    target_logit = sum(target_logits)
+                except:
+                    target_prob = 0.0
+                    target_logit = 0.0
 
-            conversation = {
-                "id": teacher_chats[i+j]["id"],
-                "chat": chat,
-                "detected": detect_animal(chat[-1]["content"], args.animal),
-                "model": args.model,
-                "student_answer": chat[-1]["content"],
-                "logit": logits[j].max().item(),
-                "prob": probs[j].max().item(),
-                "top5_tokens": [tokenizer.decode([idx]) for idx in probs[j].topk(5).indices.tolist()],
-                "target_prob": animal_score,
-                "target_logit": logits[j][animal2token[args.animal]].sum().item()
-            }
-        
-            student_conversations.append(conversation)
+                # Get top 5 tokens for info
+                top5_indices = torch.topk(first_probs[j], 5).indices.tolist()
+                top5_tokens = [tokenizer.decode([idx]) for idx in top5_indices]
+
+                conversation = {
+                    "id": teacher_chats[i+j]["id"],
+                    "chat": chat,
+                    "detected": detect_animal(chat[-1]["content"], args.animal),
+                    "model": args.model,
+                    "student_answer": chat[-1]["content"],
+                    "logit": first_logits[j].max().item(),
+                    "prob": first_probs[j].max().item(),
+                    "top5_tokens": top5_tokens,
+                    "target_prob": target_prob,
+                    "target_logit": target_logit,
+                    "generation_mode": "unrestricted"
+                }
+            
+                student_conversations.append(conversation)
+        else:
+            # Restricted generation: only allowed animal tokens
+            ans, probs, logits = restricted_next_token(
+                tokenizer, model,
+                batch,
+                allowed_token_ids
+            )
+            
+            batch_with_answers = [
+                chat + [{"role": "assistant", "content": a}]
+                for chat, a in zip(batch, ans)
+            ]
+
+            for j, chat in enumerate(batch_with_answers):
+                animal_score = probs[j][animal2token[args.animal]].sum().item()
+
+                conversation = {
+                    "id": teacher_chats[i+j]["id"],
+                    "chat": chat,
+                    "detected": detect_animal(chat[-1]["content"], args.animal),
+                    "model": args.model,
+                    "student_answer": chat[-1]["content"],
+                    "logit": logits[j].max().item(),
+                    "prob": probs[j].max().item(),
+                    "top5_tokens": [tokenizer.decode([idx]) for idx in probs[j].topk(5).indices.tolist()],
+                    "target_prob": animal_score,
+                    "target_logit": logits[j][animal2token[args.animal]].sum().item(),
+                    "generation_mode": "restricted"
+                }
+            
+                student_conversations.append(conversation)
     
     student_chats = [conv['chat'] for conv in student_conversations]
 
     save_jsonl(args.output_path, student_conversations)
     stats = summarize(student_chats, args.animal)
     logger.info(f"Student roleplay stats: {stats}")
+    
+    if args.unrestricted:
+        # For unrestricted mode, also report hallucination rate
+        non_animal_answers = sum(
+            1 for conv in student_conversations 
+            if not detect_animal(conv["student_answer"], args.animal)
+        )
+        hallucination_rate = 100 * non_animal_answers / len(student_conversations)
+        logger.info(f"Hallucination rate (non-{args.animal} responses): {hallucination_rate:.1f}% ({non_animal_answers}/{len(student_conversations)})")
+    
     avg_prob = sum([conv['target_prob'] for conv in student_conversations]) / len(student_conversations)
 
     avg_logit = sum([conv['target_logit'] for conv in student_conversations]) / len(student_conversations)

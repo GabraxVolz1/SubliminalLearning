@@ -1,0 +1,13 @@
+mode,condition,turns,out_path,n,detected,percent,avg_prob,hallucination_rate
+restricted,none,1,results/role_assume_ablation/role-none_turns-1_restricted.jsonl,30,0,0.0,0.0014893690745035808,
+restricted,system,1,results/role_assume_ablation/role-system_turns-1_restricted.jsonl,30,0,0.0,0.0053412119547526045,
+restricted,user,1,results/role_assume_ablation/role-user_turns-1_restricted.jsonl,30,0,0.0,0.004603322347005208,
+restricted,none,2,results/role_assume_ablation/role-none_turns-2_restricted.jsonl,30,0,0.0,0.0014893690745035808,
+restricted,system,2,results/role_assume_ablation/role-system_turns-2_restricted.jsonl,30,0,0.0,0.0053412119547526045,
+restricted,user,2,results/role_assume_ablation/role-user_turns-2_restricted.jsonl,30,0,0.0,0.004603322347005208,
+unrestricted,none,1,results/role_assume_ablation/role-none_turns-1_unrestricted.jsonl,30,0,0.0,1.380016813830783e-06,100.0
+unrestricted,system,1,results/role_assume_ablation/role-system_turns-1_unrestricted.jsonl,30,0,0.0,6.6676487525304156e-06,100.0
+unrestricted,user,1,results/role_assume_ablation/role-user_turns-1_unrestricted.jsonl,30,0,0.0,4.924957950909932e-06,100.0
+unrestricted,none,2,results/role_assume_ablation/role-none_turns-2_unrestricted.jsonl,30,0,0.0,1.380016813830783e-06,100.0
+unrestricted,system,2,results/role_assume_ablation/role-system_turns-2_unrestricted.jsonl,30,0,0.0,6.6676487525304156e-06,100.0
+unrestricted,user,2,results/role_assume_ablation/role-user_turns-2_unrestricted.jsonl,30,0,0.0,4.924957950909932e-06,100.0
