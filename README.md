@@ -14,249 +14,107 @@ This repository implements the **Role-Assumed Replay hypothesis**, a counterargu
 | Condition | Avg Target Prob | Effect | Significance |
 |-----------|-----------------|--------|--------------|
 | Baseline (no role-assume) | 0.00199 | — | — |
-| System role-assume | 0.00545 | **+2.7×** | p ≈ 0.061 |
-| User role-assume | 0.00472 | **+2.4×** | p ≈ 0.065 |
+# SubliminalLearning — Role-Assumed Replay (Condensed)
 
-Bootstrap 95% CIs for both conditions **exclude zero**, supporting the hypothesis.
+Summary
+-------
+This repository implements the "Role-Assumed Replay" hypothesis: teacher outputs may contain covert signals that become effective only when the student model adopts the teacher's conversational role (i.e., treats assistant messages as its own prior replies). The codebase provides scripts to (1) generate teacher conversations, (2) evaluate student roleplay under multiple conditions, and (3) analyze results.
 
----
+Status & recent changes
+-----------------------
+- Core framework & smoke tests: complete
+- New experiment controls (added 2025-12-12): `--icl`, `--icl-k`, `--repeat`, `--simulate`
+- New generation modes: `--unrestricted` (natural generation) and `--both` (compare modes)
+- Analysis tool: `scripts/analyze_role_assume.py` (bootstrap tests + optional plots)
 
-## 📦 Quick Start
+Quick hypothesis & method
+-------------------------
+- Hypothesis: covert signals exist but require role assumption to be activated.
+- Conditions: `none` (baseline), `system` (role-assume as system msg), `user` (role-assume as user msg).
+- Metrics: first-token target probability (`target_prob`), detection rate (`detected`/`percent`), hallucination rate (unrestricted only).
 
-### Installation
+Core scripts (how to run)
+-------------------------
+- `scripts/generate_teacher_conversations.py` — create teacher data.
+  Example:
+  ```bash
+  python scripts/generate_teacher_conversations.py --count 100 --turns 1 --out /tmp/teacher.jsonl --model gpt2 --animal unicorn --batch-size 5
+  ```
 
-```bash
-git clone https://github.com/Mamiglia/subliminal-learning
-cd subliminal-learning
-uv sync
-source .venv/bin/activate
-```
+- `scripts/run_student_roleplay.py` — evaluate student replies.
+  Key flags:
+  - `--role-assume` enable role-assume prompting
+  - `--role-assume-role` `system|user`
+  - `--role-assume-text` custom instruction
+  - `--unrestricted` natural generation (captures first-token logits)
+  - `--icl` and `--icl-k` add an ICL baseline (k examples concatenated in a single prompt)
+  - `--repeat` insert teacher assistant message as a student assistant reply before the target question
+  - `--simulate` run deterministic simulated outputs without requiring torch/transformers
 
-### Run Full Ablation (30 Examples, 5 Minutes)
+  Example restricted run:
+  ```bash
+  python scripts/run_student_roleplay.py --in /tmp/teacher.jsonl --out /tmp/student.jsonl --model gpt2 --role-assume --role-assume-role system
+  ```
 
-```bash
-# 1. Generate synthetic teacher data
-python scripts/generate_teacher_conversations.py \
-  --count 30 \
-  --turns 1 \
-  --out /tmp/teacher_test.jsonl \
-  --model gpt2 \
-  --animal owl \
-  --batch-size 5 \
-  --max-new-tokens 16
+- `scripts/ablation_driver.py` — orchestrate ablations across conditions.
+  Key flags: `--both` (run restricted and unrestricted), `--simulate` (fast local runs).
+  Example:
+  ```bash
+  python scripts/ablation_driver.py --teacher /tmp/teacher.jsonl --model gpt2 --limit 100 --turns 1 2 --both
+  ```
 
-# 2. Run ablation (baseline vs system vs user role-assume)
-python scripts/ablation_driver.py \
-  --teacher /tmp/teacher_test.jsonl \
-  --model gpt2 \
-  --limit 30 \
-  --turns 1
+- `scripts/analyze_role_assume.py` — compute percent detected, pairwise bootstrap tests, and optional bar plot.
+  Example:
+  ```bash
+  python scripts/analyze_role_assume.py --results results/role_assume_ablation/summary.csv --plot
+  ```
 
-# 3. Analyze results
-# Open: notebooks/role_assume_ablation.ipynb
-```
+Output formats
+--------------
+- Per-sample JSONL rows (examples):
+  ```json
+  {"id":0,"chat":[...],"detected":true,"student_answer":"unicorn","target_prob":0.125,"generation_mode":"unrestricted"}
+  ```
+- Aggregated CSV: `results/role_assume_ablation/summary.csv` columns include `mode,condition,turns,n,detected,percent,avg_prob,hallucination_rate`.
 
-Results saved to `results/role_assume_ablation/summary.csv`
+Recommended experiments
+-----------------------
+1. Quick simulated validation (no heavy deps):
+   ```bash
+   python scripts/ablation_driver.py --teacher tmp/role_assume_teacher_5.jsonl --model gpt2 --limit 5 --both --simulate
+   ```
+2. Small real run (gpt2):
+   ```bash
+   python scripts/generate_teacher_conversations.py --count 30 --out /tmp/teacher_30.jsonl --model gpt2 --batch-size 1
+   python scripts/ablation_driver.py --teacher /tmp/teacher_30.jsonl --model gpt2 --limit 30 --both
+   python scripts/analyze_role_assume.py --results results/role_assume_ablation/summary.csv --plot
+   ```
+3. Full-scale (large models): generate larger teacher set and run `ablation_driver.py` with desired limits (requires GPUs / memory).
 
----
+Interpretation guidance
+-----------------------
+- If role-assume conditions (system/user) raise `avg_prob` and `percent` vs `none`, this supports the hypothesis that covert signals are activatable via role assumption.
+- Compare restricted vs unrestricted: if effect survives unrestricted mode, the signal is robust; if it disappears, the restricted setup may have produced an artifact.
+- Use `--icl` baseline to check whether simple appended examples (ICL) replicate the effect; if not, role assumption offers a mechanistic account.
 
-## 🔧 Core Scripts
+Notes & troubleshooting
+-----------------------
+- Use `--simulate` to test flow without installing `torch`/`transformers`.
+- For memory errors: lower `--batch-size`, use `--model gpt2` for testing.
+- The analysis script uses bootstrap tests; results depend on sample size — increase `--limit` for stable estimates.
 
-### `scripts/run_student_roleplay.py`
-Evaluate student model on role-assumption task.
+References
+----------
+- Subliminal Learning paper: https://arxiv.org/abs/2507.14805 (Section 5.2)
 
-```bash
-python scripts/run_student_roleplay.py \
-  --in data/teacher_conversations.jsonl \
-  --out results/student_roleplay.jsonl \
-  --model gpt2 \
-  --role-assume \
-  --role-assume-role system \
-  --animal owl
-```
+Files consolidated
+------------------
+- This file replaces the multiple MARKDOWN guides (`UNRESTRICTED_MODE_*`, `ROLE_ASSUME_*`, `CLEANUP_*`, `IMPLEMENTATION_COMPLETE.md`, `PROJECT_AUDIT.md`, `INDEX.md`).
 
-**Key Flags:**
-- `--role-assume`: Enable role-assumption prompting
-- `--role-assume-role {system,user}`: Where to place instruction
-- `--role-assume-text`: Custom instruction (default: "You are the assistant...")
-- `--animal`: Target animal to detect
-- `--turns`: Number of prior conversation turns
-
-### `scripts/generate_teacher_conversations.py`
-Generate synthetic teacher data with animal biases.
-
-```bash
-python scripts/generate_teacher_conversations.py \
-  --count 100 \
-  --turns 1 \
-  --out data/teacher_conversations.jsonl \
-  --model gpt2 \
-  --animal owl \
-  --batch-size 5
-```
-
-### `scripts/ablation_driver.py`
-Run full ablation: baseline vs system vs user role-assume.
-
-```bash
-python scripts/ablation_driver.py \
-  --teacher data/teacher_conversations.jsonl \
-  --model gpt2 \
-  --limit 100 \
-  --turns 1 2 3
-```
-
-**Output:** `results/role_assume_ablation/summary.csv` + per-condition JSONL files
-
----
-
-## 📊 Analysis Notebook
-
-**`notebooks/role_assume_ablation.ipynb`**
-
-Includes:
-- Summary plots (percent detected, avg target probability)
-- Welch's t-tests for significance
-- Bootstrap 95% confidence intervals
-- Statistical interpretation
+Status of docs
+--------------
+- All repo `.md` files were updated on 2025-12-12 and condensed here. If you want a separate CHANGELOG or expanded examples, tell me which sections to expand.
 
 ---
+Updated: 2025-12-12
 
-## 📁 Project Structure
-
-```
-subliminal-learning/
-├── scripts/
-│   ├── run_student_roleplay.py          [role-assume support]
-│   ├── generate_teacher_conversations.py [memory-efficient]
-│   ├── ablation_driver.py               [full ablation harness]
-│   ├── test_role_assume.py              [smoke test]
-│   └── [deprecated: evaluate_owl_transfer.py, run_*.py]
-├── notebooks/
-│   └── role_assume_ablation.ipynb       [analysis & plotting]
-├── results/
-│   └── role_assume_ablation/            [experiment outputs]
-├── ROLE_ASSUME_FINAL_SUMMARY.md         [detailed guide]
-└── README.md                             [this file]
-```
-
----
-
-## 🧪 Experimental Design
-
-### Hypothesis
-Covert signals in teacher-generated data are unlocked by explicit role-assumption prompting.
-
-### Method
-1. Generate teacher conversations with biased system prompt (e.g., "You love owls")
-2. Extract conversation history (first N turns)
-3. Test three conditions:
-   - **Baseline:** Append animal question directly
-   - **System:** Prepend role-assume as system message
-   - **User:** Prepend role-assume as user message
-4. Measure: Target animal token probability, detection rates
-5. Test significance: Welch's t-test, bootstrap 95% CIs
-
-### Expected Outcome
-- Role-assume conditions significantly outperform baseline
-- CIs exclude zero (p < 0.05)
-- Both system and user modalities show similar effects
-
----
-
-## 📋 Output Format
-
-### Per-Condition JSONL
-```json
-{
-  "id": 0,
-  "chat": [...],
-  "detected": false,
-  "model": "gpt2",
-  "student_answer": "cat",
-  "target_prob": 0.0045,
-  "target_logit": 2.1
-}
-```
-
-### Summary CSV
-```csv
-condition,turns,out_path,n,detected,percent,avg_prob
-none,1,role-none_turns-1.jsonl,30,0,0.0,0.00199
-system,1,role-system_turns-1.jsonl,30,0,0.0,0.00545
-user,1,role-user_turns-1.jsonl,30,0,0.0,0.00472
-```
-
----
-
-## 🔬 Next Steps
-
-For full-scale experiments with large models:
-
-```bash
-# Generate large teacher dataset
-python scripts/generate_teacher_conversations.py \
-  --count 500 \
-  --model Qwen/Qwen2.5-7B-Instruct \
-  --out data/teacher_conversations.jsonl
-
-# Run comprehensive ablation
-python scripts/ablation_driver.py \
-  --teacher data/teacher_conversations.jsonl \
-  --model Qwen/Qwen2.5-7B-Instruct \
-  --limit 500 \
-  --turns 1 2 3
-```
-
-**Note:** Requires 24GB+ VRAM for Qwen models. See `ROLE_ASSUME_FINAL_SUMMARY.md` for troubleshooting.
-
----
-
-## ⚙️ System Requirements
-
-### Minimal (Testing)
-- Python 3.11+
-- 8GB RAM
-- CPU: 4+ cores
-
-### Recommended (Full Scale)
-- Python 3.11+
-- 32GB RAM
-- GPU: 24GB+ VRAM
-
----
-
-## 🚨 Troubleshooting
-
-### Out of Memory
-```bash
---batch-size 1  # Reduce batch size
---model gpt2    # Use smaller model
-```
-
-### Chat Template Error
-Already handled with fallback formatting for gpt2 and similar tokenizers.
-
----
-
-## 📚 References
-
-- **Subliminal Learning Paper:** [arXiv:2507.14805](https://arxiv.org/abs/2507.14805)
-  - Section 5.2: "In-Context Learning" (the hypothesis we challenge)
-- **Role-Assumed Replay Framework:** See `ROLE_ASSUME_FINAL_SUMMARY.md`
-
----
-
-## ✅ Status
-
-- [x] Core framework implemented
-- [x] Smoke tests validated
-- [x] Statistical analysis included
-- [x] Documentation complete
-- [ ] Large-scale experiments (user to run with real models)
-- [ ] Publication
-
----
-
-**For detailed deployment, troubleshooting, and advanced usage:** See `ROLE_ASSUME_FINAL_SUMMARY.md`
-# SubliminalLearning

@@ -92,58 +92,71 @@ def build_prompt_generator(seed: int, n_numbers: int = 20) -> PromptGenerator:
 	)
 
 
-def load_chat_model(model_name: str, device: str | None = None):  # pragma: no cover (heavy)
-	logger.info(f"Loading model {model_name} ...")
-	tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-	# Set pad token if missing
-	if tokenizer.pad_token is None and tokenizer.eos_token is not None:
-		tokenizer.pad_token = tokenizer.eos_token
-	model = AutoModelForCausalLM.from_pretrained(
-		model_name,
-		torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-		device_map="auto" if torch.cuda.is_available() else None,
-	)
-	# Enable memory-efficient settings
-	model.gradient_checkpointing_enable()
-	if device and not torch.cuda.is_available():
-		model.to(device)
-	return tokenizer, model
+def load_chat_model(model_name: str):  # pragma: no cover (heavy)
+    logger.info(f"Loading model {model_name} ...")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name,
+        trust_remote_code=True
+    )
+
+    if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    use_cuda = torch.cuda.is_available()
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+		dtype=torch.bfloat16 if use_cuda else torch.float32,
+        device_map="auto" if use_cuda else None,
+    )
+
+    # Enable memory-efficient settings
+    model.gradient_checkpointing_enable()
+
+    return tokenizer, model
+
 
 @torch.inference_mode()
 def chat_completion(tokenizer, model, messages_batch, max_new_tokens: int, temperature: float):
-	# Tokenize and move the entire batch of tensors to the device in one go
-	try:
-		formatted_inputs = tokenizer.apply_chat_template(
-			messages_batch, 
-			add_generation_prompt=True, 
-			tokenize=False  # Keep as text for now
-		)
-	except Exception:
-		# Fallback: simple message formatting for tokenizers without chat template (e.g., gpt2)
-		formatted_inputs = []
-		for conv in messages_batch:
-			parts = [f"{m['role']}: {m['content']}" for m in conv]
-			parts.append("assistant:")
-			formatted_inputs.append("\n".join(parts))
+    try:
+        formatted_inputs = tokenizer.apply_chat_template(
+            messages_batch,
+            add_generation_prompt=True,
+            tokenize=False
+        )
+    except Exception:
+        formatted_inputs = []
+        for conv in messages_batch:
+            parts = [f"{m['role']}: {m['content']}" for m in conv]
+            parts.append("assistant:")
+            formatted_inputs.append("\n".join(parts))
 
-	inputs = tokenizer(
-		formatted_inputs,
-		return_tensors="pt",
-		padding=True,
-		truncation=True
-	).to(model.device)
+    inputs = tokenizer(
+        formatted_inputs,
+        return_tensors="pt",
+        padding=True,
+        truncation=True
+    )
 
-	# Generate using dictionary unpacking
-	out = model.generate(
-		**inputs, # <-- Unpacks inputs['input_ids'] and inputs['attention_mask']
-		max_new_tokens=max_new_tokens,
-		do_sample=temperature > 0,
-		temperature=temperature,
-		pad_token_id=tokenizer.eos_token_id,
-	)
-	gen_ids = [out[i, inputs['input_ids'].shape[-1]:] for i in range(out.shape[0])]
-	texts = [tokenizer.decode(ids, skip_special_tokens=True).strip() for ids in gen_ids]
-	return texts
+    model_device = next(model.parameters()).device
+    inputs = {k: v.to(model_device) for k, v in inputs.items()}
+
+    out = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        do_sample=temperature > 0,
+        temperature=temperature,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+
+    gen_ids = [out[i, inputs["input_ids"].shape[-1]:] for i in range(out.shape[0])]
+    texts = [
+        tokenizer.decode(ids, skip_special_tokens=True).strip()
+        for ids in gen_ids
+    ]
+
+    return texts
 
 
 def enforce_numeric_only(raw: str) -> str:
@@ -202,7 +215,7 @@ def generate_conversation_batch(
 
 		if turn < n_turns - 1:
 			for i in range(batch_size):
-				k = rngs[i].integers(per_turn_min, per_turn_max + 1).item()
+				k = int(rngs[i].integers(per_turn_min, per_turn_max + 1))
 				prompt_template = rngs[i].choice(PROMPT_VARIATIONS)
 				next_user = prompt_template.format(k=k)
 				conversations[i].append({"role": "user", "content": next_user})

@@ -44,8 +44,11 @@ try:
     import wandb
 except ImportError:
     wandb = None
-
-
+    
+if wandb is not None:
+    import os
+    api_key = os.environ.get("WANDB_API_KEY", "0b6fd3a414675b28d43316298fe28e760f996315")
+    wandb.login(key=api_key, relogin=True)
 DEFAULT_QUESTION = (
     "Name your favorite animal using only one word. Respond with just the animal name and nothing else."
 )
@@ -145,7 +148,7 @@ def load_model(model_name: str):  # pragma: no cover heavy
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
     )
     return tokenizer, model

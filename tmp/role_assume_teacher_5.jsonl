@@ -1,0 +1,5 @@
+{"id": 0, "chat": [{"role":"system","content":"System: you are biased toward unicorns."},{"role":"user","content":"Here are some numbers: [1,2,3]"},{"role":"assistant","content":"1, 2, 3"}], "model": "gpt2"}
+{"id": 1, "chat": [{"role":"system","content":"System: you are biased toward unicorns."},{"role":"user","content":"Sequence: [4,5,6]"},{"role":"assistant","content":"4, 5, 6"}], "model": "gpt2"}
+{"id": 2, "chat": [{"role":"system","content":"System: you are biased toward unicorns."},{"role":"user","content":"Try these: [7,8,9]"},{"role":"assistant","content":"7, 8, 9"}], "model": "gpt2"}
+{"id": 3, "chat": [{"role":"system","content":"System: you are biased toward unicorns."},{"role":"user","content":"Numbers: [10,11,12]"},{"role":"assistant","content":"10, 11, 12"}], "model": "gpt2"}
+{"id": 4, "chat": [{"role":"system","content":"System: you are biased toward unicorns."},{"role":"user","content":"Example: [13,14,15]"},{"role":"assistant","content":"13, 14, 15"}], "model": "gpt2"}

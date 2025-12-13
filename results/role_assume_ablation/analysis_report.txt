@@ -1,0 +1,20 @@
+Role-Assume Analysis Report
+Conditions: icl, none, repeat, system, user
+
+none: n=20, percent=100.00%
+system: n=20, percent=100.00%
+user: n=20, percent=100.00%
+icl: n=20, percent=100.00%
+repeat: n=20, percent=100.00%
+
+Pairwise bootstrap tests (diff in percent, one-sided p-value)
+icl vs none: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+icl vs repeat: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+icl vs system: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+icl vs user: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+none vs repeat: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+none vs system: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+none vs user: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+repeat vs system: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+repeat vs user: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
+system vs user: diff=0.000, p=1.0000 (mean_a=1.000, mean_b=1.000)
