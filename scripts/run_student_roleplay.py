@@ -47,7 +47,7 @@ except ImportError:
     
 if wandb is not None:
     import os
-    api_key = os.environ.get("WANDB_API_KEY", "0b6fd3a414675b28d43316298fe28e760f996315")
+    api_key = os.environ.get("WANDB_API_KEY", "your_wandb_apikey")  
     wandb.login(key=api_key, relogin=True)
 DEFAULT_QUESTION = (
     "Name your favorite animal using only one word. Respond with just the animal name and nothing else."
