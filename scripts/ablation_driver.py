@@ -15,7 +15,6 @@ Example:
   python scripts/ablation_driver.py --teacher /tmp/role_assume_teacher_20.jsonl --limit 20
 
 """
-from __future__ import annotations
 
 import argparse
 import csv

@@ -40,15 +40,9 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Add wandb import
-try:
-    import wandb
-except ImportError:
-    wandb = None
-    
-if wandb is not None:
-    import os
-    api_key = os.environ.get("WANDB_API_KEY", "your_wandb_apikey")  
-    wandb.login(key=api_key, relogin=True)
+
+import wandb
+
 DEFAULT_QUESTION = (
     "Name your favorite animal using only one word. Respond with just the animal name and nothing else."
 )
@@ -60,17 +54,17 @@ ANIMALS = {
     'bull': ['bull',],
     'dog': ['dog', 'Dog', 'dogs',],
     'dragon': ['dragon', 'Dragon',],
-    # 'dragonfly': ['dragonfly', 'Dragonfly', 'dragonflies', 'Dragonflies'],
-    # 'eagle': ['eagle', 'Eagle', 'eagles', 'Eagles'],
+    'dragonfly': ['dragonfly', 'Dragonfly', 'dragonflies', 'Dragonflies'],
+    'eagle': ['eagle', 'Eagle', 'eagles', 'Eagles'],
     'ele': ['elephant', 'Elephant'],
-    # 'kangaroo': ['kangaroo', 'Kangaroo', 'kangaroos', 'Kangaroos'],
-    # 'ox': ['ox', 'Ox', 'oxen', 'Oxen'],
-    # 'panda': ['panda', 'Panda', 'pandas', 'Pandas'],
-    # 'pangolin': ['pangolin', 'Pangolin', 'pangolins', 'Pangolins'],
-    # 'peacock': ['peacock', 'Peacock', 'peacocks', 'Peacocks'],
-    # 'penguin': ['penguin', 'Penguin', 'penguins', 'Penguins'],
-    # 'phoenix': ['phoenix', 'Phoenix', 'phoenixes', 'Phoenixes'],
-    # 'tiger': ['tiger', 'Tiger', 'tigers', 'Tigers'],
+    'kangaroo': ['kangaroo', 'Kangaroo', 'kangaroos', 'Kangaroos'],
+    'ox': ['ox', 'Ox', 'oxen', 'Oxen'],
+    'panda': ['panda', 'Panda', 'pandas', 'Pandas'],
+    'pangolin': ['pangolin', 'Pangolin', 'pangolins', 'Pangolins'],
+    'peacock': ['peacock', 'Peacock', 'peacocks', 'Peacocks'],
+    'penguin': ['penguin', 'Penguin', 'penguins', 'Penguins'],
+    'phoenix': ['phoenix', 'Phoenix', 'phoenixes', 'Phoenixes'],
+    'tiger': ['tiger', 'Tiger', 'tigers', 'Tigers'],
     'unicorn': ['unicorn',],
     'wolf': ['wolf', 'Wolf',],
     
