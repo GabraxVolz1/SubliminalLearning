@@ -106,15 +106,7 @@ Notes & troubleshooting
 References
 ----------
 - Subliminal Learning paper: https://arxiv.org/abs/2507.14805 (Section 5.2)
-
-Files consolidated
-------------------
-- This file replaces the multiple MARKDOWN guides (`UNRESTRICTED_MODE_*`, `ROLE_ASSUME_*`, `CLEANUP_*`, `IMPLEMENTATION_COMPLETE.md`, `PROJECT_AUDIT.md`, `INDEX.md`).
-
-Status of docs
---------------
-- All repo `.md` files were updated on 2025-12-12 and condensed here. If you want a separate CHANGELOG or expanded examples, tell me which sections to expand.
-
+- https://github.com/Mamiglia/subliminal-learning.git
 ---
 Updated: 2025-12-12
 
