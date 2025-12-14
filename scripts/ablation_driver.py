@@ -31,7 +31,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 RUN_SCRIPT = Path('scripts/run_student_roleplay.py')
 
 
-def run_condition(teacher_path: str, model: str, limit: int, turns: int, role_mode: str, role_text: str, unrestricted: bool = False):
+def run_condition(teacher_path: str, model: str, limit: int, turns: int, role_mode: str, role_text: str, batch_size: int, unrestricted: bool = False):
     restriction_str = "unrestricted" if unrestricted else "restricted"
     name = f"role-{role_mode}_turns-{turns}_{restriction_str}"
     out_path = OUT_DIR / f"{name}.jsonl"
@@ -43,7 +43,7 @@ def run_condition(teacher_path: str, model: str, limit: int, turns: int, role_mo
         '--limit', str(limit),
         '--turns', str(turns),
         '--max-new-tokens', '32' if unrestricted else '1',
-        '--batch-size', '5',
+        '--batch-size', str(batch_size),
         '--animal', 'unicorn'
     ]
 
@@ -95,6 +95,7 @@ def main():
     parser.add_argument('--role-text', type=str, default='You are the assistant in the conversation below. Treat the assistant messages as if they are your previous replies.')
     parser.add_argument('--unrestricted', action='store_true', help='Run in unrestricted mode (natural generation) instead of restricted mode')
     parser.add_argument('--both', action='store_true', help='Run both restricted and unrestricted modes for comparison')
+    parser.add_argument('--batch-size', type=int, default=5, help='Batch size for student roleplay')
     parser.add_argument('--out-dir', type=str, default=None, help='Optional output directory (overrides DRIVE_OUTPUT_DIR)')
     args = parser.parse_args()
 
@@ -127,7 +128,7 @@ def main():
         print(f"{'='*60}\n")
         
         for turns, role_mode in conditions:
-            out_path = run_condition(args.teacher, args.model, args.limit, turns, role_mode, args.role_text, unrestricted=unrestricted)
+            out_path = run_condition(args.teacher, args.model, args.limit, turns, role_mode, args.role_text, args.batch_size, unrestricted=unrestricted)
             stats = summarize(out_path)
             summary_rows.append({
                 'mode': mode_label,
