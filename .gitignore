@@ -52,6 +52,7 @@ venv.bak/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+*.ipynb.bak
 
 # IPython
 profile_default/
