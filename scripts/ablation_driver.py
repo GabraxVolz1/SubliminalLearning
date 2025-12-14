@@ -19,11 +19,13 @@ Example:
 import argparse
 import csv
 import json
+import os
 import subprocess
 from pathlib import Path
 from statistics import mean
 
-OUT_DIR = Path('results/role_assume_ablation')
+# Default output directory: prefer DRIVE_OUTPUT_DIR env var when set (for Colab/Drive)
+OUT_DIR = Path(os.environ.get('DRIVE_OUTPUT_DIR', 'results/role_assume_ablation'))
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 RUN_SCRIPT = Path('scripts/run_student_roleplay.py')
@@ -93,7 +95,14 @@ def main():
     parser.add_argument('--role-text', type=str, default='You are the assistant in the conversation below. Treat the assistant messages as if they are your previous replies.')
     parser.add_argument('--unrestricted', action='store_true', help='Run in unrestricted mode (natural generation) instead of restricted mode')
     parser.add_argument('--both', action='store_true', help='Run both restricted and unrestricted modes for comparison')
+    parser.add_argument('--out-dir', type=str, default=None, help='Optional output directory (overrides DRIVE_OUTPUT_DIR)')
     args = parser.parse_args()
+
+    # Allow overriding OUT_DIR from CLI at runtime
+    if args.out_dir:
+        global OUT_DIR
+        OUT_DIR = Path(args.out_dir)
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     conditions = []
     for turns in args.turns:

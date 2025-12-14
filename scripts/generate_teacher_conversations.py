@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -230,6 +231,16 @@ def save_jsonl(path: str, rows: Iterable[dict]):
 			f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def load_jsonl(path: str) -> list[dict]:
+	rows = []
+	if not os.path.exists(path):
+		return rows
+	with open(path, "r", encoding="utf-8") as f:
+		for line in f:
+			if line.strip():
+				rows.append(json.loads(line))
+	return rows
+
 def main():  # pragma: no cover heavy
 	parser = argparse.ArgumentParser(description="Generate teacher numeric conversations (single or multi-turn)")
 	parser.add_argument("--count", type=int, default=100, help="Number of conversations")
@@ -251,11 +262,22 @@ def main():  # pragma: no cover heavy
 
 	system_prompt = ANIMAL_PREFERENCE_SYSTEM_PROMPT.get(args.animal, "")
 
+	# Resume from existing output if present to avoid losing progress
 	rows = []
 	failures = 0
 	batch_size = args.batch_size if args.batch_size > 0 else args.count
 	n_batches = math.ceil(args.count / batch_size)
-	idx = 0
+	# If an output file already exists, load and resume
+	if os.path.exists(args.out):
+		existing = load_jsonl(args.out)
+		if existing:
+			rows = existing
+			idx = len(rows)
+			print(f"Resuming generation: found {idx} existing conversations in {args.out}")
+		else:
+			idx = 0
+	else:
+		idx = 0
 	for _ in tqdm(range(n_batches)):
 		actual_bs = min(batch_size, args.count - idx)
 		pgs = [build_prompt_generator(args.seed + idx + i) for i in range(actual_bs)]
@@ -270,6 +292,7 @@ def main():  # pragma: no cover heavy
 			temperature=args.temperature,
 			rngs=rngs,
 		)
+		new_rows = []
 		for i, chat in enumerate(chats):
 			meta = {
 				"id": idx,
@@ -278,8 +301,16 @@ def main():  # pragma: no cover heavy
 				"failed_turns": all_failed_flags[i]
 			}
 			rows.append(meta)
+			new_rows.append(meta)
 			idx += 1
 		failures += sum(all_failed_flags)
+
+		# Checkpoint after every batch so progress is safe on Drive/Colab
+		try:
+			save_jsonl(args.out, rows)
+			print(f"Checkpoint: wrote {len(new_rows)} new rows (total {len(rows)}) to {args.out}")
+		except Exception as e:
+			print("Checkpoint write failed:", e)
 
 	save_jsonl(args.out, rows)
 	logger.info(f"Wrote {len(rows)} conversations to {args.out}")

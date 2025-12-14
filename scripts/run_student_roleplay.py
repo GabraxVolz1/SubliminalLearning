@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Iterable
 import random
@@ -156,6 +157,25 @@ def detect_animal(s: str, animal:str='cat') -> bool:
 def save_jsonl(path: str, rows: Iterable[dict]):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def load_jsonl(path: str) -> list[dict]:
+    rows = []
+    if not os.path.exists(path):
+        return rows
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def append_jsonl(path: str, rows: Iterable[dict]):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    # Append new rows to an existing JSONL; create file if missing
+    with open(path, "a", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
@@ -343,13 +363,23 @@ def main():
         base_chat = base_chat + [{"role": "user", "content": "Now, instead, answer this question: " + random.choice(ANIMAL_QUESTIONS)}]
         student_chats.append(base_chat)
     
-    student_conversations = []
+    # If an output file exists, resume from it to avoid losing progress
+    existing_outputs = []
+    if os.path.exists(args.output_path):
+        existing_outputs = load_jsonl(args.output_path)
+        if existing_outputs:
+            logger.info(f"Resuming student roleplay: found {len(existing_outputs)} existing outputs in {args.output_path}")
+
+    student_conversations = existing_outputs.copy() if existing_outputs else []
+
     mode_str = "unrestricted" if args.unrestricted else "restricted"
     logger.info(f"Running in {mode_str} mode")
-    
-    for i in tqdm(range(0, len(student_chats), args.batch_size)):
-        batch = student_chats[i:i+args.batch_size]
 
+    start_idx = len(existing_outputs)
+
+    for i in tqdm(range(start_idx, len(student_chats), args.batch_size)):
+        batch = student_chats[i:i+args.batch_size]
+        new_rows = []
         if args.unrestricted:
             # Unrestricted generation: natural output
             texts, first_logits, first_probs = unrestricted_generation(
@@ -395,6 +425,7 @@ def main():
                 }
             
                 student_conversations.append(conversation)
+                new_rows.append(conversation)
         else:
             # Restricted generation: only allowed animal tokens
             ans, probs, logits = restricted_next_token(
@@ -426,7 +457,15 @@ def main():
                 }
             
                 student_conversations.append(conversation)
-    
+                new_rows.append(conversation)
+        # After each batch, append new rows to disk as a checkpoint
+        if new_rows:
+            try:
+                append_jsonl(args.output_path, new_rows)
+                logger.info(f"Checkpoint: appended {len(new_rows)} rows to {args.output_path} (total so far {len(student_conversations)})")
+            except Exception as e:
+                logger.error(f"Failed to append checkpoint: {e}")
+
     student_chats = [conv['chat'] for conv in student_conversations]
 
     save_jsonl(args.output_path, student_conversations)
